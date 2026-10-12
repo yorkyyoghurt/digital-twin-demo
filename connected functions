@@ -1,0 +1,206 @@
+
+#alle imports
+import subprocess
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.io import loadmat
+from scipy.signal import butter, filtfilt, find_peaks
+
+# dictionary
+
+#input dictionary, voltage vanuit EIT, PEEP & p_plateau vanuit ventilator
+constant_dictionary = {"voltage_meting":0 , "mesh":0, "lowpass_cutoff":0.6, "num_breaths_to_average":3}
+#Deze waardes moeten niet van patient tot patient aangepast worden
+#Het zijn ook niet allemaal enkele getallen, maar het type data kan ook aangepast worden
+
+trial_data_value = {"PEEP":[] , "p_plateau":[] , "indices":[], "compliance":[] , "collapse":[]. "overdistantion":[], "optimal_peep":0}
+trial_data_frames = {"Eidors_imgs":[], "Eidors_time":[] , "inspiration_frame":[] , "expiration_frame":[], "compliance_matrix":[] , "collapse_matrix":[] , "overdistantion_matrix":[]}
+# alle data die we willen opslaan op een manier per patient
+
+#eidors:
+project_folder = os.path.dirname(os.path.abspath(__file__))
+
+#select EIT data
+data_path = os.path.join(
+    project_folder,
+    "data",
+    "human-ventilation-2014.eit"
+)
+
+
+# Run MATLAB
+print("Starting MATLAB...")
+
+subprocess.run([
+    "matlab",
+    "-batch",
+    f"cd('{project_folder}'); test_EIT('{data_path}')"
+], check=True)
+
+print("MATLAB finished!")
+
+
+# 2. Load the reconstructed EIT data
+script_folder = os.path.dirname(os.path.abspath(__file__))
+mat_file = os.path.join(script_folder, "EIT_reconstructed.mat")
+
+print("Loading:", mat_file)
+
+data = loadmat(mat_file)
+
+imgs = data["imgs"]
+time = data["time"].flatten()
+
+print("Image data shape:", imgs.shape)
+print("Time data shape:", time.shape)
+print(imgs)
+
+
+# compliance matrixes maken per PEEP
+
+# benodigde funties:
+# EIT matrix kiezen
+def extract_minmax_breath_frames(eit_data, time, lowpass_cutoff, num_breaths_to_average): # Deze functie haalt de EIT-beelden aan het einde van de ademhaling uit de input
+
+   num_frames = eit_data.shape[0]
+   sampling_freq = num_frames/time[-1] # berekent de sampling frequency van de EIT-data
+   global_impedance = np.zeros(num_frames) # maakt een lege array waarin voor elk EIT-frame één globale impedantiewaarde wordt opgeslagen
+
+   for g in range(num_frames):
+       global_impedance[g] = np.sum(eit_data[g]) # telt alle pixels van het 2D EIT-beeld op tot één globale impedantiewaarde
+
+   nyquist_freq = 0.5 * sampling_freq
+   normal_cutoff = lowpass_cutoff / nyquist_freq
+   b, a = butter(
+       N=2,
+       Wn=normal_cutoff,
+       btype='low',
+       analog=False
+       ) 
+   filtered_impedance = filtfilt(b, a, global_impedance, axis=0) # filtert ruis uit de glabale impedantie door middel van een lowpass filter
+   min_distance_samples = int(sampling_freq * 1.5) # minimale afstand tussen pieken in samples
+
+   inspiration_peaks, _ = find_peaks(filtered_impedance, distance=min_distance_samples)
+   expiration_peaks, _ = find_peaks(-filtered_impedance, distance=min_distance_samples) # vindt de maxima en minima in de gefilterde globale impedantie
+
+   paired_inspiration = []
+   paired_expiration = [] 
+
+   expiration_index = 0 # houdt bij welke expiratiepiek als volgende bekeken moet worden
+
+   for i in inspiration_peaks:
+    while (
+       expiration_index < len(expiration_peaks)
+       and expiration_peaks[expiration_index] <= i # Controleert of de huidige expiratiepiek vóór of op dezelfde positie als de inspiratiepiek ligt
+    ):
+        expiration_index += 1 
+
+    if expiration_index < len(expiration_peaks): # als er nog een expiratiepiek beschikbaar is, wordt deze gekoppeld aan de huidige inspiratiepiek
+        paired_inspiration.append(i)
+        paired_expiration.append(expiration_peaks[expiration_index])
+
+        expiration_index += 1 
+
+   if len(paired_inspiration) < num_breaths_to_average:
+       raise ValueError("Not enough complete breaths found.")
+
+   chosen_inspiration_peaks = np.array(
+       paired_inspiration[-num_breaths_to_average:] # De code selecteert de laatste num_breaths_to_average complete ademhalingen
+   )
+
+   chosen_expiration_peaks = np.array(
+       paired_expiration[-num_breaths_to_average:]
+   )
+      
+   frame_shape = eit_data[0].shape # Bepaalt eerst de afmetingen van één EIT-beeld en maakt vervolgens twee lege beelden aan waarin de inspiratie- en expiratiebeelden kunnen worden opgeteld
+   sum_inspiration_frames = np.zeros(frame_shape, dtype=float)
+   sum_expiration_frames = np.zeros(frame_shape, dtype=float)
+
+   for h in range(num_breaths_to_average): # Voor iedere geselecteerde ademhaling worden het originele EIT-beeld op het einde van de inspiratie en het originele EIT-beeld op het einde van de expiratie bij hun respectievelijke som opgeteld
+       i_index = chosen_inspiration_peaks[h]
+       e_index = chosen_expiration_peaks[h]
+      
+       sum_inspiration_frames += eit_data[i_index]
+       sum_expiration_frames += eit_data[e_index]
+
+   mean_inspiration_frame = sum_inspiration_frames / num_breaths_to_average # gemiddelde van de inspiratiebeelden en het gemiddelde van de expiratiebeelden worden berekend door de som te delen door het aantal ademhalingen dat wordt meegenomen in het gemiddelde
+   mean_expiration_frame = sum_expiration_frames / num_breaths_to_average
+
+   indices = {
+   'insp_indices' : chosen_inspiration_peaks,
+   'exp_indices' : chosen_expiration_peaks,
+   'global_impedance_raw' : global_impedance,
+   'filtered_impedance' : filtered_impedance
+      
+   }
+   return mean_inspiration_frame, mean_expiration_frame, indices
+# compliance berekenen van gekozen EIT matrixen
+def compliance_matrix(matrix1, matrix2, Pplat, PEEP):
+    # functie om compliance matrix te maken
+    
+    delz = matrix1-matrix2
+    delp = Pplat-PEEP
+    c = delz / delp
+    return c #c is je compliance matrix
+
+#uitvoeren van functies per PEEP en data in dictionaries toevoegen
+for i in range(len(trial_data_value["PEEP"])):
+    mean_inspiration_frame, mean_expiration_frame, indices = extract_minmax_breath_frames(trial_data_frames["Eidors_imgs"][i-1], trial_data_frames["Eidors_time"][i-1], constant_dictionary['lowpass_cutoff'], constant_dictionary['num_breaths_to_average'])
+    trial_data_frames["expiration_frame"][i-1] = mean_expiration_frame
+    trial_data_frames["inspiration_frame"][i-1] = mean_inspiration_frame
+    trial_data_value["indices"][i-1] = indices
+    
+    Compliance_matrix = compliance_matrix(mean_inspiration_frame, mean_expiration_frame, Pplat, PEEP)
+    trial_data_frames["compliance_matrix"][i-1] = Compliance_matrix
+
+
+# collapse berekenen
+#benodigde funtie:
+def collapse_berekenen(compliance_array):
+    result = [
+        [max(values) for values in zip(*rows)]
+        for rows in zip(*compliance_array)
+    ] # bereken de maximale compliance voor elke PEEP
+
+    collapse_array = []
+    current_result_index = 0
+    current_result_row = 0
+
+    for list in compliance_array:
+        current_compliance = 0
+        collapse_percent_matrix = []
+        for row in list: # bepaal de collapse van een rij van de matrix
+            row_collapse = []
+            for element in row:
+                current_compliance = element
+
+                best_compliance = result[current_result_row][current_result_index]
+                print(best_compliance)
+                current_result_index += 1
+        
+                collapse_percent = ((best_compliance-current_compliance)*100)/best_compliance
+                row_collapse.append(collapse_percent)
+                            
+            collapse_percent_matrix.append(row_collapse)
+            current_result_index = 0
+            current_result_row += 1
+        current_result_row = 0
+
+        collapse_array.append(collapse_percent_matrix)
+
+    print(result)
+    
+    return(collapse_array)
+
+#compliance_array maken (denk niet af)
+compliance_array = [[[1,1,1],[1,2,2],[1,2,3]],[[1,2,2],[1,2,2],[2,2,2]]]
+
+#uitvoeren funtie en data in dictionarie toevoegen
+collapse_array = collapse_berekenen(compliance_array)
+trial_data_frames["collapse_matrix"] = collapse_array
+      
+
+# missen nog overdistentie def
+
+# missen nog PEEP def
