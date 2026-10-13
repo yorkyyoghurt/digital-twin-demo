@@ -31,3 +31,6 @@ pytest = "*"
 production = { solve-group = "prod" }
 test = { features = ["lint", "test"], solve-group = "prod" }
 default = { features = ["lint", "test"], solve-group = "prod" }
+
+[pypi-dependencies]
+pytest = "*"
