@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from scipy.io import loadmat
 from scipy.signal import butter, filtfilt, find_peaks
 
-# dictionaries
+# 0. dictionaries
 
 constant_dictionary = {"voltage_meting":0 , "mesh":0, "lowpass_cutoff":0.6, "num_breaths_to_average":3}
 patient_data = { "pao2_fio2":0 , "patient_id":0}
@@ -16,13 +16,14 @@ patient_data = { "pao2_fio2":0 , "patient_id":0}
 trial_data_value = {"PEEP":[] , "p_plateau":[] ,  "compliance":[] , "collapse":[], "overdistention":[], "optimal_peep":0}
 trial_data_frames = {"compliance_matrix":[] , "collapse_matrix":[] , "overdistention_matrix":[]}
 
-#first questions to fill in patient_data
+
+# 1. first questions to fill in patient_data
 patient_data["pao2_fio2"] = float(input("Enter the patient's PaO2/FiO2 ratio (mmHg): "))
 patient_data["patient_id"] = input("Enter the patient's ID: ")
 
-# peep trial
+# 2. peep trial
 # functions to run peep trial:
-def get_initial_peep(pao2_fio2):
+def get_initial_peep(pao2_fio2): 
 
     if pao2_fio2 < 100:
         return 24
@@ -131,6 +132,7 @@ def compliance_matrix(matrix1, matrix2, Pplat, PEEP):
 
 # function peep trial
 def run_peep_trial(pao2_fio2):
+    #get initial PEEP and sequence
     initial_peep = get_initial_peep(pao2_fio2)
     sequence = get_peep_sequence(initial_peep)
     trial_data_value["PEEP"] = sequence
@@ -138,20 +140,24 @@ def run_peep_trial(pao2_fio2):
     print("Initial recruitment PEEP:", initial_peep, "cmH2O")
     print("PEEP trial sequence:", sequence)
 
+    # initiate decremental peep trial (loop per peep step)
     current_index = 0
 
     while True:
+        # set the PEEP value (add in manual override if needed)
         current_peep = sequence[current_index]
-
         print(f"\nSet PEEP to {current_peep} cmH2O.")
+        
         # enter p_plateau value and store it in trial_data_value["p_plateau"]
         P_plateau = float(input("Enter the measured Pplateau value (cmH2O): "))
         trial_data_value["p_plateau"].append(P_plateau)
+
+        # doctor instruction (add in EIT data collection)
         print("Maintain this level for 2 minutes.")
         input("After the step is completed, press Enter to continue.")
 
         ###### somehow new data ##########################################################################
-        
+        # temporary EIT data collection (add in actual EIT data collection code here)
         EIT_data = os.path.dirname(os.path.abspath(__file__))
 
         data_path = os.path.join(
@@ -163,6 +169,7 @@ def run_peep_trial(pao2_fio2):
         ###################################################################################################
 
         # Run MATLAB
+
         #silenced prints
         # print("Starting MATLAB...")
 
@@ -184,6 +191,7 @@ def run_peep_trial(pao2_fio2):
 
         data = loadmat(mat_file)
 
+        # EIT data (check units and consistancy, correct and name in limitations)
         imgs = data["imgs"]
         time = data["time"].flatten()
 
@@ -192,11 +200,14 @@ def run_peep_trial(pao2_fio2):
         #print("Time data shape:", time.shape)
         #print(imgs)
 
+        # Extract the mean inspiration and expiration frames (indices are also returned, currently not used, but could be useful for further analysis or output)
         mean_inspiration_frame, mean_expiration_frame, indices = extract_minmax_breath_frames(imgs, time, constant_dictionary['lowpass_cutoff'], constant_dictionary['num_breaths_to_average'])
 
+        # Calculate compliance matrix and store it in trial_data_frames["compliance_matrix"]
         Compliance_matrix = compliance_matrix(mean_inspiration_frame, mean_expiration_frame, P_plateau, current_peep)
         trial_data_frames["compliance_matrix"].append(Compliance_matrix)
-        
+
+        # initiate next step in the PEEP trial
         next_peep = get_next_peep(sequence, current_index)
 
         if next_peep is None:
@@ -210,7 +221,7 @@ def run_peep_trial(pao2_fio2):
 run_peep_trial(patient_data["pao2_fio2"])
 
 
-# collapse and overdistention calculation
+# 3. collapse and overdistention function
 def collapse_berekenen(compliance_array):
     result = [
         [max(values) for values in zip(*rows)]
@@ -270,14 +281,16 @@ def collapse_berekenen(compliance_array):
     
     return(collapse_array,overdistention_array, collapse_percentage, overdistention_percentage)
 
+#running collapse and overdistention calculation
 collapse_matrix, overdistention_matrix, collapse_percentage, overdistention_percentage = collapse_berekenen(trial_data_frames["compliance_matrix"])
 
+# storing restults in dictionaries
 trial_data_frames["collapse_matrix"] = collapse_matrix
 trial_data_frames["overdistention_matrix"] = overdistention_matrix
 trial_data_value["overdistention"] = overdistention_percentage
 trial_data_value["collapse"] = collapse_percentage
 
-# optimal peep 
+# 4. optimal peep 
 # functions
 def calculate_optimal_peep(peep, collapse, overdistension):
     peep = np.asarray(peep, dtype=float)
@@ -330,4 +343,6 @@ def plot(peep, collapse, overdistension):
     plt.grid(True)
     plt.show()
 
+# running optimal peep calculation and plotting
 plot(trial_data_value["PEEP"], trial_data_value["collapse"], trial_data_value["overdistension"])
+print(f"the optimal PEEP is: {trial_data_value['optimal_peep']} cmH2O")
