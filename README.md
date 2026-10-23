@@ -21,4 +21,4 @@ import matplotlib.pyplot as plt
 from scipy.io import loadmat
 from scipy.signal import butter, filtfilt, find_peaks
 
-By running the file backend.app.app_interface.py in python a seperate window with our user interface will open. Currently our frontend is not yet linked with our backend, but it is usable to see what it will look like.
+By running the file backend.app.app_interface.py in the UI-interface branch in python a seperate window with our user interface will open. Currently our frontend is not yet linked with our backend, but it is usable to see what it will look like.
