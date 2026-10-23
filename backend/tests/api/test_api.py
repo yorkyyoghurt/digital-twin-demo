@@ -1,5 +1,5 @@
 #zetten hier alle testen voor api in (import alles voor app, dus denk alles backend)
-from app.main import app, extract_minmax_breath_frames
+from app.main import app, extract_minmax_breath_frames, compliance_matrix
 
 #?? from fastapi.testclient import TestClient
 #?? client = TestClient(app)
@@ -7,6 +7,7 @@ from app.main import app, extract_minmax_breath_frames
 import numpy as np
 import pytest
 
+# extract_minmax_breath_frames tests
 def make_test_data(num_frames=15): #  maakt een test EIT data set, 15 frames van 2x2 pixels die hier wordt gebruikt
     eit_data = np.zeros((num_frames, 2, 2), dtype=float)
     for i in range(num_frames):
@@ -63,4 +64,49 @@ def test_raises_error_when_not_enough_breaths(monkeypatch): # deze test controle
 
     with pytest.raises(ValueError, match="Not enough complete breaths found"):
         extract_minmax_breath_frames(eit_data,sampling_freq=10,num_breaths_to_average=2)
+
+# test for compliance_matrix
+def test_compliance_matrix_basic():
+    matrix1 = np.array([[10, 20], [30, 40]])
+    matrix2 = np.array([[2, 5], [10, 15]])
+    Pplat = 20
+    PEEP = 5
+
+    result = compliance_matrix(matrix1, matrix2, Pplat, PEEP)
+
+    expected = np.array([
+        [8 / 15, 1],
+        [4 / 3, 5 / 3]
+    ])
+
+    np.testing.assert_allclose(result, expected)
+
+def test_compliance_matrix_zero_difference():
+    matrix1 = np.array([[5, 10], [15, 20]])
+    matrix2 = np.array([[5, 10], [15, 20]])
+
+    result = compliance_matrix(matrix1, matrix2, 20, 5)
+
+    expected = np.zeros((2, 2))
+    np.testing.assert_array_equal(result, expected)
+
+def test_compliance_matrix_negative_values():
+    matrix1 = np.array([[1, 2], [3, 4]])
+    matrix2 = np.array([[2, 4], [6, 8]])
+
+    result = compliance_matrix(matrix1, matrix2, 15, 5)
+
+    expected = np.array([
+        [-0.1, -0.2],
+        [-0.3, -0.4]
+    ])
+
+    np.testing.assert_allclose(result, expected)
+
+def test_compliance_matrix_zero_division():
+    matrix1 = np.array([[10, 20]])
+    matrix2 = np.array([[2, 5]])
+
+    with pytest.raises(ZeroDivisionError):
+        compliance_matrix(matrix1, matrix2, 5, 5)
 
