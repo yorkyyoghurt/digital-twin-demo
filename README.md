@@ -11,21 +11,14 @@ In order to use the digital twin you need to have downloaded and set up EIDORS, 
 Furthermore the following imports are needed:
 
 from fastapi import FastAPI
-
 from fastapi.middleware.cors import CORSMiddleware
-
 from .api.bmi import router as bmi_router
-
 import subprocess
-
 import os
-
 from time import time
-
 import numpy as np
-
 import matplotlib.pyplot as plt
-
 from scipy.io import loadmat
-
 from scipy.signal import butter, filtfilt, find_peaks
+
+By running the file backend.app.app_interface.py in python a seperate window with our user interface will open. Currently our frontend is not yet linked with our backend, but it is usable to see what it will look like.
