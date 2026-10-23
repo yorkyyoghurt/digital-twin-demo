@@ -22,3 +22,5 @@ from scipy.io import loadmat
 from scipy.signal import butter, filtfilt, find_peaks
 
 By running the file backend.app.app_interface.py in the UI-interface branch in python a seperate window with our user interface will open. Currently our frontend is not yet linked with our backend, but it is usable to see what it will look like.
+
+The backend can be viewed and used in the backend_basic branch, using the file backend.app.main.py file
