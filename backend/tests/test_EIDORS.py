@@ -3,7 +3,7 @@ import numpy as np
 from scipy.io import savemat
 
 # Replace this import with the actual location of your script
-from app.models.EIDORS import load_eit_data
+from backend.app.EIDORS import load_eit_data
 
 
 def test_load_eit_data(tmp_path):

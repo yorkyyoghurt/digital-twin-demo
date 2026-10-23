@@ -1,8 +1,8 @@
 # durfte ff niet aan de api shit te zitten ##############################################################
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+#from fastapi import FastAPI
+#from fastapi.middleware.cors import CORSMiddleware
 
-from .api.bmi import router as bmi_router
+#from .api.bmi import router as bmi_router
 ##########################################################################################################
 
 #all imports
@@ -19,8 +19,8 @@ from scipy.signal import butter, filtfilt, find_peaks
 constant_dictionary = {"voltage_meting":0 , "mesh":0, "lowpass_cutoff":0.6, "num_breaths_to_average":3}
 patient_data = { "pao2_fio2":0 , "patient_id":0}
 
-trial_data_value = {"PEEP":[] , "p_plateau":[] ,  "compliance":[] , "collapse":[], "overdistention":[], "optimal_peep":0}
-trial_data_frames = {"compliance_matrix":[] , "collapse_matrix":[] , "overdistention_matrix":[]}
+trial_data_value = {"PEEP":[] , "p_plateau":[] ,  "compliance":[] , "collapse":[], "overdistension":[], "optimal_peep":0}
+trial_data_frames = {"compliance_matrix":[] , "collapse_matrix":[] , "overdistension_matrix":[]}
 
 
 # 1. first questions to fill in patient_data
@@ -177,7 +177,7 @@ def run_peep_trial(pao2_fio2):
         # Run MATLAB
 
         #silenced prints
-        # print("Starting MATLAB...")
+        print("Starting MATLAB...")
 
         subprocess.run([
            "matlab",
@@ -186,25 +186,26 @@ def run_peep_trial(pao2_fio2):
         ], check=True)
 
         #silenced prints
-        # print("MATLAB finished!")
+        print("MATLAB finished!")
 
         # Load the reconstructed EIT data
         script_folder = os.path.dirname(os.path.abspath(__file__))
         mat_file = os.path.join(script_folder, "EIT_reconstructed.mat")
 
         # silenced prints
-        # print("Loading:", mat_file)
+        print("Loading:", mat_file)
 
         data = loadmat(mat_file)
 
         # EIT data (check units and consistancy, correct and name in limitations)
-        imgs = data["imgs"]
+        imgs = np.real(data["imgs"])
+        imgs = np.moveaxis(imgs, -1, 0)
         time = data["time"].flatten()
 
         #silenced prints
         #print("Image data shape:", imgs.shape)
         #print("Time data shape:", time.shape)
-        #print(imgs)
+        print(imgs)
 
         # Extract the mean inspiration and expiration frames (indices are also returned, currently not used, but could be useful for further analysis or output)
         mean_inspiration_frame, mean_expiration_frame, indices = extract_minmax_breath_frames(imgs, time, constant_dictionary['lowpass_cutoff'], constant_dictionary['num_breaths_to_average'])
@@ -227,7 +228,7 @@ def run_peep_trial(pao2_fio2):
 run_peep_trial(patient_data["pao2_fio2"])
 
 
-# 3. collapse and overdistention function
+# 3. collapse and overdistension function
 def collapse_berekenen(compliance_array):
     result = [
         [max(values) for values in zip(*rows)]
@@ -236,8 +237,8 @@ def collapse_berekenen(compliance_array):
 
     collapse_array = []
     collapse_percentage = []
-    overdistention_array = []
-    overdistention_percentage = []
+    overdistension_array = []
+    overdistension_percentage = []
     
     current_result_index = 0
     current_result_row = 0
@@ -249,51 +250,55 @@ def collapse_berekenen(compliance_array):
     for list in compliance_array:
         current_compliance = 0
         collapse_percent_matrix = []
-        overdistention_percent_matrix = []
+        overdistension_percent_matrix = []
         for row in list: # bepaal de collapse van een rij van de matrix
             row_collapse = []
-            row_overdistention = []
+            row_overdistension = []
             for element in row:
                 current_compliance = element
 
                 best_compliance = result[current_result_row][current_result_index]
                 current_result_index += 1
         
-                collapse_percent = ((best_compliance-current_compliance)*100)/best_compliance
-                overdistention_percent = collapse_percent
+                if best_compliance == 0:
+                    collapse_percent = 0.0
+                    overdistension_percent = 0.0
+                else:
+                    collapse_percent = ((best_compliance - current_compliance) * 100) / best_compliance
+                    overdistension_percent = collapse_percent
 
-                if current_compliance == best_compliance: #bepaal of de beste compliance al is geweest
-                    list_best_compliance.append((current_result_row,current_result_index))
+                    if current_compliance == best_compliance: #bepaal of de beste compliance al is geweest
+                        list_best_compliance.append((current_result_row,current_result_index))
 
-                if (current_result_row,current_result_index) in list_best_compliance: # als de beste compliance al is geweest is de overdistention sws 0
-                    overdistention_percent = 0
+                    if (current_result_row,current_result_index) in list_best_compliance: # als de beste compliance al is geweest is de overdistension sws 0
+                        overdistension_percent = 0
 
-                if (current_result_row,current_result_index) not in list_best_compliance: # anders is de collapse sws 0
-                                    collapse_percent = 0
+                    if (current_result_row,current_result_index) not in list_best_compliance: # anders is de collapse sws 0
+                        collapse_percent = 0
                 
                 row_collapse.append(collapse_percent)
-                row_overdistention.append(overdistention_percent)
+                row_overdistension.append(overdistension_percent)
                             
             collapse_percent_matrix.append(row_collapse)
-            overdistention_percent_matrix.append(row_overdistention)
+            overdistension_percent_matrix.append(row_overdistension)
             current_result_index = 0
             current_result_row += 1
         current_result_row = 0
 
-        overdistention_array.append(overdistention_percent_matrix)
+        overdistension_array.append(overdistension_percent_matrix)
         collapse_array.append(collapse_percent_matrix)
         collapse_percentage.append(np.mean(collapse_percent_matrix))
-        overdistention_percentage.append(np.mean(overdistention_percent_matrix))
+        overdistension_percentage.append(np.mean(overdistension_percent_matrix))
     
-    return(collapse_array,overdistention_array, collapse_percentage, overdistention_percentage)
+    return(collapse_array,overdistension_array, collapse_percentage, overdistension_percentage)
 
-#running collapse and overdistention calculation
-collapse_matrix, overdistention_matrix, collapse_percentage, overdistention_percentage = collapse_berekenen(trial_data_frames["compliance_matrix"])
+#running collapse and overdistension calculation
+collapse_matrix, overdistension_matrix, collapse_percentage, overdistension_percentage = collapse_berekenen(trial_data_frames["compliance_matrix"])
 
 # storing restults in dictionaries
 trial_data_frames["collapse_matrix"] = collapse_matrix
-trial_data_frames["overdistention_matrix"] = overdistention_matrix
-trial_data_value["overdistention"] = overdistention_percentage
+trial_data_frames["overdistension_matrix"] = overdistension_matrix
+trial_data_value["overdistension"] = overdistension_percentage
 trial_data_value["collapse"] = collapse_percentage
 
 # 4. optimal peep 
